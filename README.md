@@ -37,6 +37,50 @@ hidden input goes to the operating-system credential store, while `env:VARIABLE_
 stores only the variable name. Add each readable local directory separately with
 `cove-sensory-mcp configure paths`.
 
+### Continue an interrupted setup
+
+Run `uv run cove-sensory-mcp configure` again and select the same Provider. For a
+custom Provider, select `custom` and enter its existing identifier. The wizard detects
+the saved entry **before** asking for credentials and offers to continue setup. It
+keeps the saved model, endpoint, and credential source; this is not a credential-edit
+or overwrite operation.
+
+Choose the eye and/or ear roles you want to enable. The wizard checks whether the
+credential can be read locally, then requests permission to send tiny test media for
+only the selected, still-unverified capabilities. Previously verified capabilities
+can be enabled without another paid test. A capability becomes the default only after
+verification succeeds. Replacing a different default requires a separate confirmation;
+continuing an existing default preserves its authorized fallbacks. Declining or
+cancelling keeps the Provider settings and any completed verification, so you can retry.
+
+Use these local diagnostics when setup is incomplete:
+
+```console
+uv run cove-sensory-mcp --version
+uv run cove-sensory-mcp status
+uv run cove-sensory-mcp doctor
+```
+
+`status` distinguishes configured-but-not-verified capabilities from verified-but-not-
+enabled defaults, and checks local credential availability separately. `sensory_status`
+is a configuration-only MCP status tool: it does not read credentials or check Provider
+connectivity. Do not manually mark capabilities verified to bypass a failed test.
+
+With `env:VARIABLE_NAME`, the variable must actually be set in the process running the
+MCP. Typing that reference does not set an API key. On Windows, a variable set only in
+one terminal is not necessarily available to an already-running desktop client; make
+it available to the MCP launch process and restart the terminal/client as needed.
+Missing local credentials are not the same as a Provider rejecting a key. Verification
+failures show bounded error codes, not secret values or raw Provider responses. Never
+send API keys, environment dumps, or entire configuration files in chat.
+
+You do not need all five capabilities enabled: MiniMax's built-in eye covers `image`
+and `video_visual`, not hearing. In an MCP self-test, request only the capabilities
+you have configured (for example, `modalities: ["image", "video_visual"]`). The CLI
+`self-test` command still requests all five; use the configuration wizard for role-
+specific testing and activation. A standalone self-test records verification but does
+not choose your default Providers; return to `configure` to enable them.
+
 ## Choose the eyes and ears
 
 - Gemini can be an eye for images/video and an ear for video audio, ordinary audio, and

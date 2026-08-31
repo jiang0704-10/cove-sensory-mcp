@@ -95,13 +95,39 @@ def _status_from_config(config: AppConfig) -> SensoryStatus:
                 ):
                     mode = "native_video"
         verified = provider_id is not None
+        reason = None
+        if not verified:
+            declared = [
+                provider
+                for provider in config.providers.values()
+                if provider.declared_capabilities.get(modality, False)
+            ]
+            if not config.providers:
+                reason = _NOT_VERIFIED_REASON
+            elif any(
+                provider.verified_capabilities.get(modality, False) for provider in declared
+            ):
+                reason = (
+                    "A provider is verified but this capability is not enabled on a verified "
+                    "default route. Run cove-sensory-mcp configure to continue setup."
+                )
+            elif declared:
+                reason = (
+                    "A provider is configured but this capability is not verified. "
+                    "Run cove-sensory-mcp configure to continue setup."
+                )
+            else:
+                reason = (
+                    "No provider declares this capability. Configure a suitable provider "
+                    "only if needed; all five capabilities are not required."
+                )
         capabilities[modality] = CapabilityStatus(
             modality=modality,
             enabled=verified,
             verified=verified,
             provider=provider_id,
             mode=mode,
-            reason=None if verified else _NOT_VERIFIED_REASON,
+            reason=reason,
         )
     return SensoryStatus(
         ready=any(capability.verified for capability in capabilities.values()),

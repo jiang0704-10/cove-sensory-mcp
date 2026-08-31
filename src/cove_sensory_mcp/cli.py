@@ -121,6 +121,8 @@ def _default_capabilities(*modalities: Modality) -> dict[Modality, bool]:
 def _provider_from_answers(
     provider_choice: str,
     input_fn: InputFn,
+    *,
+    custom_provider_id: str | None = None,
 ) -> tuple[str, ProviderConfig]:
     if provider_choice == "gemini":
         credential_ref, api_key_env = _credential_source(
@@ -162,7 +164,7 @@ def _provider_from_answers(
         return "minimax-m3", provider
 
     if provider_choice == "custom":
-        provider_id = _validated_identifier(
+        provider_id = custom_provider_id or _validated_identifier(
             _clean_answer(input_fn, "Provider identifier: ")
         )
         credential_ref, api_key_env = _credential_source(
@@ -236,10 +238,14 @@ def _write_verified_routes(
     provider_id: str,
     selected_modalities: Sequence[Modality],
     input_fn: InputFn,
-) -> None:
+    *,
+    expected_provider: ProviderConfig | None = None,
+) -> AppConfig:
     """Collect authorizations, then merge routes in one short locked transaction."""
     snapshot = services.config_store.load()
-    primary = snapshot.providers[provider_id]
+    primary = snapshot.providers.get(provider_id)
+    if primary is None or (expected_provider is not None and primary != expected_provider):
+        raise SensoryError(ErrorCode.CONFIG_INVALID, _CONFIG_CHANGED_MESSAGE)
     original_primary = primary.model_copy(deep=True)
     planned: dict[
         Modality,
@@ -248,6 +254,16 @@ def _write_verified_routes(
     for modality in selected_modalities:
         if not primary.verified_capabilities.get(modality, False):
             continue
+        existing_route = getattr(snapshot.routes, modality.value)
+        if existing_route is not None:
+            if existing_route.primary == provider_id:
+                # A resume must preserve the user's existing fallback authorizations.
+                continue
+            if not _optional_yes(
+                input_fn,
+                f"Replace the existing default Provider for {modality.value}? [y/N]: ",
+            ):
+                continue
         eligible: dict[str, ProviderConfig] = {}
         authorized_ids: list[str] = []
         for fallback_id, fallback in sorted(snapshot.providers.items()):
@@ -272,7 +288,7 @@ def _write_verified_routes(
             authorized_ids,
         )
     if not planned:
-        return
+        return snapshot
 
     def merge_routes(latest: AppConfig) -> None:
         current_primary = latest.providers.get(provider_id)
@@ -299,7 +315,195 @@ def _write_verified_routes(
                 RouteConfig(primary=provider_id, fallbacks=fallbacks),
             )
 
-    services.config_store.update(merge_routes)
+    return services.config_store.update(merge_routes)
+
+
+def _select_role_modalities(provider: ProviderConfig, input_fn: InputFn) -> list[Modality]:
+    eye = _optional_yes(input_fn, "Use this Provider as the eye? [y/N]: ")
+    ear = False
+    if provider.adapter != "minimax-m3":
+        ear = _optional_yes(input_fn, "Use this Provider as the ear? [y/N]: ")
+    return [
+        modality
+        for modality in _role_modalities(eye=eye, ear=ear)
+        if provider.declared_capabilities.get(modality, False)
+    ]
+
+
+def _credential_setup_hint(provider: ProviderConfig, output: OutputFn) -> None:
+    if provider.api_key_env is not None:
+        output(
+            "Credential: environment variable missing or unusable in this process. "
+            "env:VARIABLE_NAME only references a variable; it does not set an API key. "
+            "Set the referenced variable locally for the process launching this MCP, "
+            "then restart the terminal and MCP client as needed."
+        )
+    else:
+        output(
+            "Credential: missing or unavailable in the local operating-system "
+            "credential store. Check the saved credential under the same user account."
+        )
+    output(
+        "This is a local credential lookup, not a Provider authentication check. "
+        "No API key is displayed; never send it in chat."
+    )
+
+
+def _print_provider_progress(config: AppConfig, provider_id: str, output: OutputFn) -> None:
+    provider = config.providers[provider_id]
+    unfinished = False
+    for modality in Modality:
+        if not provider.declared_capabilities.get(modality, False):
+            continue
+        route = getattr(config.routes, modality.value)
+        if not provider.verified_capabilities.get(modality, False):
+            state = "configured, not verified"
+            unfinished = True
+        elif route is None or route.primary != provider_id:
+            state = "verified, not enabled as the default"
+            unfinished = True
+        else:
+            state = "enabled (verified default; credential checked separately)"
+        output(f"Provider {provider_id} / {modality.value}: {state}")
+    if unfinished:
+        output(
+            "Next: run cove-sensory-mcp configure, select this existing Provider "
+            "(custom for a custom identifier), and continue setup. "
+            "Only enable the capabilities you need; all five are not required."
+        )
+
+
+def _print_verification_failures(result: dict[str, object], output: OutputFn) -> None:
+    """Expose only stable error codes, never raw messages, endpoints, or responses."""
+    candidates: list[object] = []
+    error = result.get("error")
+    if isinstance(error, dict):
+        candidates.append(error.get("code"))
+    results = result.get("results")
+    if isinstance(results, list):
+        candidates.extend(
+            item.get("reason") for item in results[:len(Modality)]
+            if isinstance(item, dict)
+        )
+    codes: set[str] = set()
+    for candidate in candidates:
+        if isinstance(candidate, str):
+            try:
+                codes.add(ErrorCode(candidate).value)
+            except ValueError:
+                pass
+    for code in sorted(codes):
+        output(f"Verification failure code: {code}")
+
+
+def _finish_provider_setup(
+    services: AppServices,
+    provider_id: str,
+    provider: ProviderConfig,
+    selected_modalities: list[Modality],
+    input_fn: InputFn,
+    output: OutputFn,
+    verify_fn: ConfigureVerifyFn,
+) -> int:
+    """Verify selected missing capabilities, then enable them with route consent."""
+    if not selected_modalities:
+        output(
+            "No supported capabilities selected; saved settings were kept. "
+            "Continue with configure later."
+        )
+        return 0
+    try:
+        current = services.config_store.load().providers.get(provider_id)
+        if current != provider:
+            raise SensoryError(ErrorCode.CONFIG_INVALID, _CONFIG_CHANGED_MESSAGE)
+        if not _credential_available(services, provider_id, provider):
+            _credential_setup_hint(provider, output)
+            output("Saved settings were kept. Run configure again to continue setup.")
+            return 1
+        pending = [
+            modality
+            for modality in selected_modalities
+            if not provider.verified_capabilities.get(modality, False)
+        ]
+        failed = False
+        if pending:
+            output(
+                "Verification notice: this sends tiny test media for "
+                + ", ".join(modality.value for modality in pending)
+                + " to the selected Provider and may use a small amount of Provider quota."
+            )
+            if _optional_yes(input_fn, "Run capability verification now? [y/N]: "):
+                if services.config_store.load().providers.get(provider_id) != provider:
+                    raise SensoryError(ErrorCode.CONFIG_INVALID, _CONFIG_CHANGED_MESSAGE)
+
+                async def run_verification() -> dict[str, object]:
+                    return await verify_fn(services, provider_id, pending)
+
+                result = asyncio.run(run_verification())
+                failed = result.get("status") == "error"
+                _print_verification_failures(result, output)
+                if failed:
+                    output(
+                        "Verification did not pass; unverified capabilities will not be enabled."
+                    )
+            else:
+                output("Verification deferred. Run configure again to continue setup.")
+        latest = services.config_store.load()
+        current = latest.providers.get(provider_id)
+        verification_fields = {
+            "verified_capabilities",
+            "verified_joint_capabilities",
+            "last_verified_at",
+        }
+        if current is None or (
+            current.model_dump(exclude=verification_fields)
+            != provider.model_dump(exclude=verification_fields)
+        ):
+            raise SensoryError(ErrorCode.CONFIG_INVALID, _CONFIG_CHANGED_MESSAGE)
+        activated = _write_verified_routes(
+            services, provider_id, selected_modalities, input_fn,
+            expected_provider=current,
+        )
+        _print_provider_progress(activated, provider_id, output)
+        return 1 if failed else 0
+    except (EOFError, KeyboardInterrupt, StopIteration, _ConfigurationCancelled):
+        output(
+            "Setup continuation cancelled; no new default routes were enabled. "
+            "Saved Provider settings and any completed verification were kept."
+        )
+        return 1
+    except (OSError, SensoryError, ValueError):
+        output(
+            "Setup could not continue safely: configuration changed or could not be read, "
+            "or a setup answer was invalid. No new default routes were enabled. "
+            "Run status and configure again; existing settings were not replaced."
+        )
+        return 1
+
+
+def _resume_provider(
+    services: AppServices,
+    provider_id: str,
+    provider: ProviderConfig,
+    input_fn: InputFn,
+    output: OutputFn,
+    verify_fn: ConfigureVerifyFn,
+) -> int:
+    output(
+        f"Provider {provider_id} already exists. Resume setup using its saved model, "
+        "endpoint, and credential source; none will be replaced."
+    )
+    try:
+        if not _optional_yes(input_fn, "Continue setting up this existing Provider? [y/N]: "):
+            output("Setup continuation declined; existing settings were kept.")
+            return 1
+        selected = _select_role_modalities(provider, input_fn)
+    except (EOFError, KeyboardInterrupt, StopIteration, _ConfigurationCancelled, ValueError):
+        output("Setup continuation cancelled; existing settings were kept.")
+        return 1
+    return _finish_provider_setup(
+        services, provider_id, provider, selected, input_fn, output, verify_fn,
+    )
 
 
 def run_configure(
@@ -327,9 +531,22 @@ def run_configure(
             input_fn,
             "Provider [gemini/minimax-m3/custom/cancel]: ",
         ).lower()
+        if provider_choice not in {"gemini", "minimax-m3", "custom"}:
+            raise ValueError("invalid provider")
+        provider_id = (
+            _validated_identifier(_clean_answer(input_fn, "Provider identifier: "))
+            if provider_choice == "custom"
+            else provider_choice
+        )
+        if provider_id in config.providers:
+            return _resume_provider(
+                services, provider_id, config.providers[provider_id],
+                input_fn, output, verify_fn,
+            )
         provider_id, provider = _provider_from_answers(
             provider_choice,
             input_fn,
+            custom_provider_id=provider_id if provider_choice == "custom" else None,
         )
         credential_ref = provider.credential_ref
         if provider_id in config.providers or (
@@ -358,10 +575,7 @@ def run_configure(
                 )
                 return 1
             secret = secret_input_fn("API key (local input, hidden): ")
-        eye = _optional_yes(input_fn, "Use this Provider as the eye? [y/N]: ")
-        ear = False
-        if provider.adapter != "minimax-m3":
-            ear = _optional_yes(input_fn, "Use this Provider as the ear? [y/N]: ")
+        selected_modalities = _select_role_modalities(provider, input_fn)
     except (EOFError, KeyboardInterrupt, StopIteration, _ConfigurationCancelled):
         output("Configuration cancelled; nothing was saved.")
         return 1
@@ -427,52 +641,9 @@ def run_configure(
     else:
         output("Credential: stored locally (value and reference are hidden).")
 
-    selected_modalities = [
-        modality
-        for modality in _role_modalities(eye=eye, ear=ear)
-        if provider.declared_capabilities.get(modality, False)
-    ]
-    if selected_modalities:
-        output(
-            "Verification notice: this sends tiny test media to the selected Provider "
-            "and may use a small amount of Provider quota."
-        )
-        try:
-            verify_now = _optional_yes(
-                input_fn,
-                "Run capability verification now? [y/N]: ",
-            )
-        except (EOFError, KeyboardInterrupt, _ConfigurationCancelled, ValueError):
-            output(
-                "Verification was not started; the Provider remains saved without new routes."
-            )
-            return 0
-        if verify_now:
-
-            async def run_verification() -> dict[str, object]:
-                return await verify_fn(services, provider_id, selected_modalities)
-
-            result: dict[str, object] = asyncio.run(run_verification())
-            if result.get("status") == "error":
-                output("Verification did not pass; no unverified route was written.")
-            try:
-                _write_verified_routes(
-                    services,
-                    provider_id,
-                    selected_modalities,
-                    input_fn,
-                )
-            except (
-                EOFError,
-                KeyboardInterrupt,
-                SensoryError,
-                _ConfigurationCancelled,
-                ValueError,
-            ):
-                output(
-                    "Fallback authorization stopped; no implicit fallback was added."
-                )
-    return 0
+    return _finish_provider_setup(
+        services, provider_id, provider, selected_modalities, input_fn, output, verify_fn,
+    )
 
 
 def run_configure_paths(
@@ -539,6 +710,9 @@ def run_status(services: AppServices, output: OutputFn) -> int:
             else "missing"
         )
         output(f"Provider {provider_id}: credential {state}")
+        if state == "missing":
+            _credential_setup_hint(provider, output)
+        _print_provider_progress(config, provider_id, output)
     verified_routes = 0
     for modality in Modality:
         route = getattr(config.routes, modality.value)
