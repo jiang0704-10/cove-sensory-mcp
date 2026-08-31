@@ -1,6 +1,14 @@
 # Changelog
 
-## [Unreleased]
+## [0.1.2] - 2026-08-31
+
+- Resume an existing Provider's setup without replacing its model, endpoint, or
+  credential source. Verify only selected, still-unverified capabilities and enable
+  previously verified capabilities without another paid self-test.
+- Preserve existing defaults and authorized fallbacks; require explicit permission
+  to replace a different default and reject concurrent configuration changes.
+- Distinguish missing local credentials, unverified capabilities, and verified but
+  inactive defaults. Show only bounded error codes for Provider verification failures.
 
 - Gemini Files uploads now use scoped binary streams so Unicode local filenames work
   without copying private media to ASCII-named temporary files.

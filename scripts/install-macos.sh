@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="0.1.1"
+VERSION="0.1.2"
 INSTALL_ROOT="${COVE_INSTALL_ROOT:-${HOME}/Library/Application Support/cove-sensory-mcp/bin}"
 ARCHIVE=""
 CHECKSUM=""
