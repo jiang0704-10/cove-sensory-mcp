@@ -14,6 +14,8 @@ Environment variables:
 - `PORT` — bind port, default `8000` (hosting platforms normally inject this).
 - `COVE_MCP_PATH` — MCP path, default `/mcp`.
 - `COVE_LOG_LEVEL` — Python log level, default `INFO`.
+- `COVE_CONFIG_FILE` — config path for remote/Linux deployments, default `/app/data/config.yaml`.
+- `COVE_JOBS_DIR` — transient jobs path, default `/tmp/cove-sensory-mcp/jobs`.
 
 The server is stateless at the MCP transport layer and returns JSON responses.
 The original `cove-sensory-mcp serve` stdio behavior is unchanged.
@@ -45,5 +47,4 @@ authentication system. Do not expose a quota-bearing provider behind a public
 production URL until authentication (or an equivalent trusted gateway) is in
 place.
 
-A later hardening patch should add standards-compatible MCP authorization and a
-non-secret health endpoint before production use.
+The health endpoint is intentionally non-secret. Standards-compatible MCP OAuth resource-server authorization is still required before production use. A temporary static bearer shim was deliberately rejected because ChatGPT-compatible MCP authorization should use the SDK's `TokenVerifier` + `AuthSettings` flow rather than nonstandard transport middleware.
