@@ -4,7 +4,6 @@ providers:
     adapter: openai-compatible
     base_url: https://api.gemai.cc/v1
     model: [福利]gemini-3.5-flash
-    credential_ref: gemai
     api_key_env: GEMAI_API_KEY
     declared_capabilities:
       image: true
@@ -15,7 +14,6 @@ providers:
     adapter: openai-compatible
     base_url: https://api.gemai.cc/v1
     model: [福利]gemini-3.5-flash
-    credential_ref: gemai
     api_key_env: GEMAI_API_KEY
     declared_capabilities:
       audio: true
