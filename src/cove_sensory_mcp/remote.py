@@ -10,6 +10,10 @@ import logging
 import os
 from pathlib import Path
 
+from pydantic import AnyHttpUrl
+from mcp.server.auth.provider import AccessToken, TokenVerifier
+from mcp.server.auth.settings import AuthSettings
+
 from cove_sensory_mcp.config.secrets import KeyringSecretStore
 from cove_sensory_mcp.config.store import ConfigStore
 from cove_sensory_mcp.server import create_server
@@ -40,6 +44,52 @@ def _build_remote_services() -> AppServices:
     )
 
 
+class _StaticTokenVerifier(TokenVerifier):
+    """Verify a deployment token without logging or persisting it."""
+
+    def __init__(self, expected: str, resource: str, scope: str) -> None:
+        self._expected = expected
+        self._resource = resource
+        self._scope = scope
+
+    async def verify_token(self, token: str) -> AccessToken | None:
+        import hmac
+
+        if not hmac.compare_digest(token, self._expected):
+            return None
+        return AccessToken(
+            token=token,
+            client_id="cove-remote",
+            scopes=[self._scope],
+            resource=self._resource,
+        )
+
+
+def _auth_options(path: str) -> dict[str, object]:
+    """Return standards-compatible MCP resource-server auth when configured."""
+    token = os.environ.get("COVE_REMOTE_BEARER_TOKEN", "").strip()
+    public_base = os.environ.get("COVE_PUBLIC_BASE_URL", "").rstrip("/")
+    issuer = os.environ.get("COVE_AUTH_ISSUER_URL", "").rstrip("/")
+    if not token:
+        return {}
+    if not public_base or not issuer:
+        raise ValueError(
+            "COVE_PUBLIC_BASE_URL and COVE_AUTH_ISSUER_URL are required when "
+            "COVE_REMOTE_BEARER_TOKEN is set"
+        )
+    resource = f"{public_base}{path}"
+    scope = "cove:sense"
+    return {
+        "token_verifier": _StaticTokenVerifier(token, resource, scope),
+        "auth": AuthSettings(
+            issuer_url=AnyHttpUrl(issuer),
+            resource_server_url=AnyHttpUrl(resource),
+            required_scopes=[scope],
+            validate_token_resource=True,
+        ),
+    }
+
+
 def main() -> None:
     """Serve the existing sensory toolset over MCP Streamable HTTP."""
     host = os.environ.get("HOST", "0.0.0.0")
@@ -57,7 +107,7 @@ def main() -> None:
         "Starting Cove Sensory MCP remote server on %s:%s%s", host, port, path
     )
 
-    server = create_server(_build_remote_services())
+    server = create_server(_build_remote_services(), **_auth_options(path))
 
     @server.custom_route("/health", methods=["GET"])
     async def health(_: Request) -> JSONResponse:
