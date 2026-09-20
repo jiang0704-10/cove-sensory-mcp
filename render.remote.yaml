@@ -1,11 +1,15 @@
 services:
   - type: web
     name: cove-sensory-mcp
-    runtime: docker
-    dockerfilePath: ./Dockerfile.remote
+    runtime: python
+    branch: feature/remote-mcp
+    buildCommand: pip install .
+    startCommand: python -m cove_sensory_mcp.remote
     healthCheckPath: /health
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.7
+      - key: COVE_CONFIG_FILE
+        value: /opt/render/project/src/examples/remote-gemai.config.yaml
       - key: COVE_MCP_PATH
         value: /mcp
