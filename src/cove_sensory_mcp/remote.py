@@ -8,9 +8,12 @@ from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
 
-from cove_sensory_mcp.cli import _build_services
+from cove_sensory_mcp.config.secrets import KeyringSecretStore
+from cove_sensory_mcp.config.store import ConfigStore
 from cove_sensory_mcp.server import create_server
+from cove_sensory_mcp.services import AppServices
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
@@ -23,6 +26,18 @@ def _env_int(name: str, default: int) -> int:
     if value < 1:
         raise ValueError(f"{name} must be a positive integer")
     return value
+
+
+def _build_remote_services() -> AppServices:
+    """Build services without relying on the local-only OS path resolver."""
+    config_file = Path(os.environ.get("COVE_CONFIG_FILE", "/app/data/config.yaml"))
+    jobs_dir = Path(os.environ.get("COVE_JOBS_DIR", "/tmp/cove-sensory-mcp/jobs"))
+    config_file.parent.mkdir(parents=True, exist_ok=True)
+    jobs_dir.mkdir(parents=True, exist_ok=True)
+    return AppServices(
+        config_store=ConfigStore(config_file, jobs_dir=jobs_dir),
+        secret_store=KeyringSecretStore(),
+    )
 
 
 def main() -> None:
@@ -42,7 +57,7 @@ def main() -> None:
         "Starting Cove Sensory MCP remote server on %s:%s%s", host, port, path
     )
 
-    server = create_server(_build_services())
+    server = create_server(_build_remote_services())
 
     @server.custom_route("/health", methods=["GET"])
     async def health(_: Request) -> JSONResponse:
