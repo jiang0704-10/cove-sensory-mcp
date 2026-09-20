@@ -115,9 +115,9 @@ class _PrivacySafeFastMCP(FastMCP[None]):
             return _invalid_arguments_result()
 
 
-def create_server(services: AppServices) -> FastMCP[None]:
+def create_server(services: AppServices, **server_kwargs: Any) -> FastMCP[None]:
     """Bind the foundation setup handlers to the official Python MCP server."""
-    server: FastMCP[None] = _PrivacySafeFastMCP("cove-sensory-mcp")
+    server: FastMCP[None] = _PrivacySafeFastMCP("cove-sensory-mcp", **server_kwargs)
 
     @server.tool(
         name="sensory_status",
