@@ -1,0 +1,33 @@
+version: 1
+providers:
+  gemai_image:
+    adapter: openai-compatible
+    base_url: https://api.gemai.cc/v1
+    model: REPLACE_WITH_GEMAI_VISION_MODEL
+    api_key_env: GEMAI_API_KEY
+    declared_capabilities:
+      image: true
+    adapter_options:
+      endpoint_path: /chat/completions
+      media_part_mode: image_url_data_uri
+  gemai_audio:
+    adapter: openai-compatible
+    base_url: https://api.gemai.cc/v1
+    model: REPLACE_WITH_GEMAI_AUDIO_MODEL
+    api_key_env: GEMAI_API_KEY
+    declared_capabilities:
+      audio: true
+      music: true
+      video_audio: true
+    adapter_options:
+      endpoint_path: /chat/completions
+      media_part_mode: input_audio_base64
+routes:
+  image:
+    provider: gemai_image
+  audio:
+    provider: gemai_audio
+  music:
+    provider: gemai_audio
+  video_audio:
+    provider: gemai_audio
