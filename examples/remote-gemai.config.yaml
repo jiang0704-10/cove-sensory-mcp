@@ -24,10 +24,10 @@ providers:
       media_part_mode: input_audio_base64
 routes:
   image:
-    provider: gemai_image
+    primary: gemai_image
   audio:
-    provider: gemai_audio
+    primary: gemai_audio
   music:
-    provider: gemai_audio
+    primary: gemai_audio
   video_audio:
-    provider: gemai_audio
+    primary: gemai_audio
