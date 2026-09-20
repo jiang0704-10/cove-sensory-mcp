@@ -6,13 +6,14 @@ It is intended for trusted remote deployments such as Render.
 
 from __future__ import annotations
 
+import hmac
 import logging
 import os
 
 from cove_sensory_mcp.cli import _build_services
 from cove_sensory_mcp.server import create_server
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, PlainTextResponse
 
 
 def _env_int(name: str, default: int) -> int:
@@ -43,6 +44,27 @@ def main() -> None:
     )
 
     server = create_server(_build_services())
+
+    # Optional deployment guard. When set, requests to the MCP endpoint must
+    # present the exact bearer token. Health remains public for platform probes.
+    remote_token = os.environ.get("COVE_REMOTE_BEARER_TOKEN", "").strip()
+    if remote_token:
+        original_middleware = list(getattr(server.settings, "middleware", []))
+
+        from starlette.middleware.base import BaseHTTPMiddleware
+
+        class _BearerGuard(BaseHTTPMiddleware):
+            async def dispatch(self, request: Request, call_next):  # type: ignore[no-untyped-def]
+                if request.url.path == path:
+                    supplied = request.headers.get("authorization", "")
+                    expected = f"Bearer {remote_token}"
+                    if not hmac.compare_digest(supplied, expected):
+                        return PlainTextResponse("Unauthorized", status_code=401)
+                return await call_next(request)
+
+        # FastMCP accepts Starlette Middleware entries in settings.middleware.
+        from starlette.middleware import Middleware
+        server.settings.middleware = [Middleware(_BearerGuard), *original_middleware]
 
     @server.custom_route("/health", methods=["GET"])
     async def health(_: Request) -> JSONResponse:
