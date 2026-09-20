@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: cove-sensory-mcp
+    runtime: docker
+    dockerfilePath: ./Dockerfile.remote
+    healthCheckPath: /
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - key: COVE_MCP_PATH
+        value: /mcp
