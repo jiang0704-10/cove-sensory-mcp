@@ -3,7 +3,7 @@ services:
     name: cove-sensory-mcp
     runtime: docker
     dockerfilePath: ./Dockerfile.remote
-    healthCheckPath: /
+    healthCheckPath: /health
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.7
