@@ -16,7 +16,7 @@ _MISSING_ASSET_MESSAGE = "A required self-test media asset is unavailable."
 _EXPECTED_MEDIA: dict[Modality, tuple[MediaKind, str]] = {
     Modality.IMAGE: (MediaKind.IMAGE, "image/"),
     Modality.VIDEO_VISUAL: (MediaKind.VIDEO, "video/"),
-    Modality.VIDEO_AUDIO: (MediaKind.VIDEO, "video/"),
+    Modality.VIDEO_AUDIO: (MediaKind.AUDIO, "audio/"),
     Modality.AUDIO: (MediaKind.AUDIO, "audio/"),
     Modality.MUSIC: (MediaKind.AUDIO, "audio/"),
 }
@@ -56,9 +56,9 @@ class SelfTestAssetStore:
                     2.0,
                 ),
                 Modality.VIDEO_AUDIO: PreparedMedia(
-                    video,
-                    "video/mp4",
-                    MediaKind.VIDEO,
+                    audio,
+                    "audio/wav",
+                    MediaKind.AUDIO,
                     2.0,
                 ),
                 Modality.AUDIO: PreparedMedia(
