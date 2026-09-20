@@ -10,7 +10,18 @@ from cove_sensory_mcp.models import DetailLevel, ProviderId
 class _Input(BaseModel):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
-    source: str = Field(min_length=1, max_length=8_192)
+    source: str = Field(
+        min_length=1,
+        max_length=8_192,
+        description=(
+            "Media source. Pass a direct HTTPS URL that the Cove server can download, "
+            "or an absolute local path available to the Cove server. Chat attachment "
+            "names, opaque file IDs, sandbox paths, and conversation-only file references "
+            "are not valid remote sources. If the current client cannot expose an uploaded "
+            "attachment as a downloadable HTTPS URL, report that attachment handoff is "
+            "unsupported instead of inventing a source value."
+        ),
+    )
     question: str = Field(default="", max_length=8_000)
     detail: DetailLevel = DetailLevel.AUTO
     language: str = Field(default="zh-CN", min_length=2, max_length=64)
