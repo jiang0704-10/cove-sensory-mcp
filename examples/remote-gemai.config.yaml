@@ -3,7 +3,7 @@ providers:
   gemai_image:
     adapter: openai-compatible
     base_url: https://api.gemai.cc/v1
-    model: REPLACE_WITH_GEMAI_VISION_MODEL
+    model: [福利]gemini-3.5-flash
     api_key_env: GEMAI_API_KEY
     declared_capabilities:
       image: true
@@ -13,7 +13,7 @@ providers:
   gemai_audio:
     adapter: openai-compatible
     base_url: https://api.gemai.cc/v1
-    model: REPLACE_WITH_GEMAI_AUDIO_MODEL
+    model: [福利]gemini-3.5-flash
     api_key_env: GEMAI_API_KEY
     declared_capabilities:
       audio: true
