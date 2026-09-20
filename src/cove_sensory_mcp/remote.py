@@ -11,6 +11,8 @@ import os
 
 from cove_sensory_mcp.cli import _build_services
 from cove_sensory_mcp.server import create_server
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 
 def _env_int(name: str, default: int) -> int:
@@ -41,6 +43,11 @@ def main() -> None:
     )
 
     server = create_server(_build_services())
+
+    @server.custom_route("/health", methods=["GET"])
+    async def health(_: Request) -> JSONResponse:
+        return JSONResponse({"status": "ok", "service": "cove-sensory-mcp"})
+
     server.run(
         transport="streamable-http",
         host=host,
