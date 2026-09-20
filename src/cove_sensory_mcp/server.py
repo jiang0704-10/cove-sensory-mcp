@@ -11,7 +11,7 @@ from mcp.server.mcpserver import MCPServer as FastMCP
 from mcp.server.mcpserver.context import Context
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import CallToolResult, InputRequiredResult, TextContent, ToolAnnotations
-from pydantic import AfterValidator, Field
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 
 from cove_sensory_mcp.errors import ErrorCode, SensoryError, error_result
 from cove_sensory_mcp.models import DetailLevel, Modality, ProviderId
@@ -33,6 +33,27 @@ from cove_sensory_mcp.tools.setup import (
 from cove_sensory_mcp.tools.video import sense_video
 
 RequestedModality = Literal["image", "video_visual", "video_audio", "audio", "music"]
+
+class OpenAIFile(BaseModel):
+    """ChatGPT file parameter shape documented by the OpenAI Plugins runtime."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    download_url: str
+    file_id: str
+    mime_type: str | None = None
+    file_name: str | None = None
+
+
+_FILE_PARAM_META = {"openai/fileParams": ["file"]}
+
+
+def _media_source(source: str | None, file: OpenAIFile | None) -> str:
+    if file is not None:
+        return file.download_url
+    if source:
+        return source
+    raise ToolError("A media file or source URL is required.")
 
 
 def _require_unique_modalities(
@@ -172,9 +193,11 @@ def create_server(services: AppServices, **server_kwargs: Any) -> FastMCP[None]:
         name="sense_video",
         description=_SENSING_DESCRIPTION,
         annotations=_SENSING_ANNOTATIONS,
+        meta=_FILE_PARAM_META,
     )
     async def video_tool(
-        source: str,
+        source: str | None = None,
+        file: OpenAIFile | None = None,
         question: str = "",
         start_seconds: float | None = None,
         end_seconds: float | None = None,
@@ -187,7 +210,7 @@ def create_server(services: AppServices, **server_kwargs: Any) -> FastMCP[None]:
         return await sense_video(
             services,
             SenseVideoInput(
-                source=source,
+                source=_media_source(source, file),
                 question=question,
                 start_seconds=start_seconds,
                 end_seconds=end_seconds,
@@ -203,9 +226,11 @@ def create_server(services: AppServices, **server_kwargs: Any) -> FastMCP[None]:
         name="sense_audio",
         description=_SENSING_DESCRIPTION,
         annotations=_SENSING_ANNOTATIONS,
+        meta=_FILE_PARAM_META,
     )
     async def audio_tool(
-        source: str,
+        source: str | None = None,
+        file: OpenAIFile | None = None,
         question: str = "",
         start_seconds: float | None = None,
         end_seconds: float | None = None,
@@ -216,7 +241,7 @@ def create_server(services: AppServices, **server_kwargs: Any) -> FastMCP[None]:
         return await sense_audio(
             services,
             SenseAudioInput(
-                source=source,
+                source=_media_source(source, file),
                 question=question,
                 start_seconds=start_seconds,
                 end_seconds=end_seconds,
