@@ -7,6 +7,7 @@ import logging
 import sys
 from typing import Annotated, Any, Literal
 
+from mcp.server.apps import Apps, ResourceCsp
 from mcp.server.mcpserver import MCPServer as FastMCP
 from mcp.server.mcpserver.context import Context
 from mcp.server.mcpserver.exceptions import ToolError
@@ -138,7 +139,61 @@ class _PrivacySafeFastMCP(FastMCP[None]):
 
 def create_server(services: AppServices, **server_kwargs: Any) -> FastMCP[None]:
     """Bind the foundation setup handlers to the official Python MCP server."""
-    server: FastMCP[None] = _PrivacySafeFastMCP("cove-sensory-mcp", **server_kwargs)
+    apps = Apps()
+    server: FastMCP[None] = _PrivacySafeFastMCP(
+        "cove-sensory-mcp", extensions=[apps], **server_kwargs
+    )
+
+    audio_bridge_html = r"""<!doctype html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+body{font:14px system-ui;margin:0;padding:12px;color:CanvasText;background:Canvas}
+#s{white-space:pre-wrap;line-height:1.45}.muted{opacity:.7}
+</style></head>
+<body><div id="s" class="muted">正在把附件交给耳朵…</div>
+<script>
+(async()=>{
+  const el=document.getElementById("s");
+  try{
+    const input=window.openai?.toolInput;
+    const file=input?.file;
+    if(!file?.file_id) throw new Error("没有收到 ChatGPT file_id");
+    if(!window.openai?.getFileDownloadUrl) throw new Error("当前客户端不支持临时文件下载 URL");
+    if(!window.openai?.callTool) throw new Error("当前客户端不支持组件调用工具");
+    const fresh=await window.openai.getFileDownloadUrl({fileId:file.file_id});
+    if(!fresh?.downloadUrl) throw new Error("没有取得临时下载 URL");
+    el.textContent="耳朵已拿到附件，正在听…";
+    const out=await window.openai.callTool("sense_audio_from_chatgpt_url",{
+      source:fresh.downloadUrl,
+      question:input?.question||"",
+      start_seconds:input?.start_seconds??null,
+      end_seconds:input?.end_seconds??null,
+      detail:input?.detail||"auto",
+      include_transcript:input?.include_transcript??true,
+      language:input?.language||"zh-CN"
+    });
+    el.textContent="听完了。";
+    const payload=out?.structuredContent ?? out?.content ?? out;
+    if(window.openai?.sendFollowUpMessage){
+      await window.openai.sendFollowUpMessage({
+        prompt:"耳朵已经完成音频分析。请根据下面的 Cove 工具结果直接回答我刚才的问题，不要再次调用文件桥。\n\n"+JSON.stringify(payload),
+        scrollToBottom:true
+      });
+    }
+  }catch(e){
+    el.textContent="附件交接失败："+(e?.message||String(e));
+  }
+})();
+</script></body></html>"""
+    apps.add_html_resource(
+        "ui://cove/audio-bridge-v1.html",
+        audio_bridge_html,
+        title="Cove audio bridge",
+        description="Refresh a ChatGPT file URL in the client before Cove downloads it.",
+        csp=ResourceCsp(connect_domains=[]),
+        prefers_border=True,
+    )
 
     @server.tool(
         name="sensory_status",
@@ -218,6 +273,66 @@ def create_server(services: AppServices, **server_kwargs: Any) -> FastMCP[None]:
                 language=language,
                 visual_provider=visual_provider,
                 audio_provider=audio_provider,
+            ),
+        )
+
+    @apps.tool(
+        resource_uri="ui://cove/audio-bridge-v1.html",
+        name="sense_audio_chatgpt_file",
+        description=(
+            "Use this for an audio attachment uploaded in ChatGPT. The small client bridge "
+            "refreshes the ChatGPT file URL, then hands the temporary URL to Cove for analysis."
+        ),
+        annotations=_SENSING_ANNOTATIONS,
+        meta=_FILE_PARAM_META,
+    )
+    async def audio_chatgpt_file_tool(
+        file: OpenAIFile,
+        question: str = "",
+        start_seconds: float | None = None,
+        end_seconds: float | None = None,
+        detail: DetailLevel = DetailLevel.AUTO,
+        include_transcript: bool = True,
+        language: str = "zh-CN",
+    ) -> dict[str, object]:
+        return {
+            "status": "bridge_ready",
+            "file_id": file.file_id,
+            "file_name": file.file_name,
+            "mime_type": file.mime_type,
+        }
+
+    @server.tool(
+        name="sense_audio_from_chatgpt_url",
+        description="App-only helper: analyze a fresh temporary ChatGPT file download URL.",
+        annotations=_SENSING_ANNOTATIONS,
+        meta={
+            "ui": {"visibility": ["app"]},
+            "openai/widgetAccessible": True,
+            "openai/visibility": "private",
+        },
+    )
+    async def audio_from_chatgpt_url_tool(
+        source: str,
+        question: str = "",
+        start_seconds: float | None = None,
+        end_seconds: float | None = None,
+        detail: DetailLevel = DetailLevel.AUTO,
+        include_transcript: bool = True,
+        language: str = "zh-CN",
+    ) -> CallToolResult:
+        if not source.startswith("https://"):
+            raise ToolError("A temporary HTTPS file URL is required.")
+        return await sense_audio(
+            services,
+            SenseAudioInput(
+                source=source,
+                question=question,
+                start_seconds=start_seconds,
+                end_seconds=end_seconds,
+                detail=detail,
+                include_transcript=include_transcript,
+                language=language,
             ),
         )
 
