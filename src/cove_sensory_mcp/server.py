@@ -196,8 +196,7 @@ def create_server(services: AppServices, **server_kwargs: Any) -> FastMCP[None]:
         meta=_FILE_PARAM_META,
     )
     async def video_tool(
-        source: str | None = None,
-        file: OpenAIFile | None = None,
+        file: OpenAIFile,
         question: str = "",
         start_seconds: float | None = None,
         end_seconds: float | None = None,
@@ -210,7 +209,7 @@ def create_server(services: AppServices, **server_kwargs: Any) -> FastMCP[None]:
         return await sense_video(
             services,
             SenseVideoInput(
-                source=_media_source(source, file),
+                source=file.download_url,
                 question=question,
                 start_seconds=start_seconds,
                 end_seconds=end_seconds,
@@ -229,8 +228,7 @@ def create_server(services: AppServices, **server_kwargs: Any) -> FastMCP[None]:
         meta=_FILE_PARAM_META,
     )
     async def audio_tool(
-        source: str | None = None,
-        file: OpenAIFile | None = None,
+        file: OpenAIFile,
         question: str = "",
         start_seconds: float | None = None,
         end_seconds: float | None = None,
@@ -241,7 +239,7 @@ def create_server(services: AppServices, **server_kwargs: Any) -> FastMCP[None]:
         return await sense_audio(
             services,
             SenseAudioInput(
-                source=_media_source(source, file),
+                source=file.download_url,
                 question=question,
                 start_seconds=start_seconds,
                 end_seconds=end_seconds,
